@@ -2,6 +2,7 @@ import type { CatalogAdapter, CommunityAdapter } from "../types";
 import { baileys } from "./community/baileys";
 import { blooio } from "./community/blooio";
 import { cloudflareDo } from "./community/cloudflare-do";
+import { dynamodb } from "./community/dynamodb";
 import { line } from "./community/line";
 import { mattermost } from "./community/mattermost";
 import { mysql } from "./community/mysql";
@@ -97,6 +98,7 @@ export const ADAPTERS = {
 export const COMMUNITY_ADAPTERS = {
   "cloudflare-do": cloudflareDo,
   mysql,
+  dynamodb,
   webex,
   baileys,
   zaileys,

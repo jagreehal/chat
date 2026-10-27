@@ -1,0 +1,115 @@
+---
+title: DynamoDB
+description: Community DynamoDB state adapter for Chat SDK. Subscriptions, distributed locking, caching, lists, and queues on a single table, authorized with IAM.
+packageName: chat-state-dynamodb
+slug: dynamodb
+type: state
+tagline: Community DynamoDB state adapter for Chat SDK, for bots on AWS Lambda that would rather not run Redis inside a VPC.
+community: true
+mdxBody: true
+---
+
+## Install
+
+<PackageInstall package="chat chat-state-dynamodb @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb" />
+
+## Quick start
+
+```typescript title="lib/bot.ts" lineNumbers
+import { Chat } from "chat";
+import { createDynamoDBState } from "chat-state-dynamodb";
+
+export const bot = new Chat({
+  userName: "mybot",
+  adapters: {
+    /* your platform adapters */
+  },
+  state: createDynamoDBState({ tableName: process.env.STATE_TABLE! }),
+});
+```
+
+The adapter uses the AWS SDK's default credential chain, so on Lambda the function's IAM role authorizes it. Grant the role read and write access to the table.
+
+## Create the table
+
+The table needs a string partition key `pk`, a string sort key `sk`, and TTL enabled on the `ttl` attribute:
+
+```sh title="Terminal"
+aws dynamodb create-table --table-name chat-state \
+  --attribute-definitions AttributeName=pk,AttributeType=S AttributeName=sk,AttributeType=S \
+  --key-schema AttributeName=pk,KeyType=HASH AttributeName=sk,KeyType=RANGE \
+  --billing-mode PAY_PER_REQUEST
+aws dynamodb update-time-to-live --table-name chat-state \
+  --time-to-live-specification Enabled=true,AttributeName=ttl
+```
+
+The package also exports `TABLE_DEFINITION`, the same schema in `CreateTableCommand` input shape, for scripts and tests.
+
+## Configuration
+
+<TypeTable
+  type={{
+    tableName: {
+      type: "string",
+      description: "Name of the DynamoDB table. Required.",
+    },
+    client: {
+      type: "DynamoDBClient",
+      description:
+        "Existing client to reuse, for example one pointed at DynamoDB Local. The adapter creates one when omitted.",
+    },
+    keyPrefix: {
+      type: "string",
+      default: '"chat"',
+      description: "Prefix for every key, so several bots can share one table.",
+    },
+    skipTableCheck: {
+      type: "boolean",
+      default: "false",
+      description:
+        "Skip the `DescribeTable` call in `connect()` that fails fast with the table name when the table is missing.",
+    },
+  }}
+/>
+
+## Using an existing client
+
+Pass `client` to reuse a `DynamoDBClient` your app already configures:
+
+```typescript
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { createDynamoDBState } from "chat-state-dynamodb";
+
+const client = new DynamoDBClient({ endpoint: "http://localhost:8000" });
+const state = createDynamoDBState({ tableName: "chat-state", client });
+```
+
+The adapter doesn't destroy a client it didn't create when you call `disconnect()`.
+
+## Data model
+
+Every kind of state is a row in the one table:
+
+| Data | `pk` | `sk` |
+| --- | --- | --- |
+| Subscriptions | `{keyPrefix}#sub#{threadId}` | `#` |
+| Locks | `{keyPrefix}#lock#{threadId}` | `#` |
+| Cache | `{keyPrefix}#kv#{key}` | `#` |
+| Lists | `{keyPrefix}#list#{key}` | One sort key per entry |
+| Queues | `{keyPrefix}#queue#{threadId}` | One sort key per entry |
+
+Lists and queues store one row per entry because a DynamoDB item holds at most 400 KB. Appending to a list with `maxLength` costs two requests: one to write the entry and one to trim the oldest rows.
+
+## Locking and expiry
+
+`acquireLock()` is a conditional `PutItem` that succeeds when no lock exists or the stored `expiresAt` has passed. `releaseLock()` and `extendLock()` are conditional on the holder's token, so a stale holder can't release or extend a lock someone else now holds.
+
+DynamoDB TTL deletes expired items lazily, sometimes up to 48 hours late, so the adapter doesn't rely on it for correctness. Reads filter on `expiresAt`, and lock conditions compare it, so an expired lock can be acquired again as soon as it expires. TTL only removes the expired rows later.
+
+## Feature support
+
+<FeatureSupport />
+
+## Resources
+
+- [Adapter source](https://github.com/jagreehal/chat-state-dynamodb)
